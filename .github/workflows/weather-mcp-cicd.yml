@@ -1,0 +1,145 @@
+name: Weather MCP Server CI/CD
+
+# PR/push: 테스트 + Docker 스모크 테스트
+# main push 또는 수동 실행: AWS 서버에 SSH로 배포 (Host 포트는 공개하지 않음)
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weather-mcp-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: weather-mcp
+  CONTAINER_NAME: weather-mcp      # Backend가 http://weather-mcp:8010/mcp 로 접근하는 이름
+  DOCKER_NETWORK: weather-net      # Backend 컨테이너와 같은 Docker 네트워크
+  REMOTE_DIR: weather-mcp-server
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Syntax check
+        run: python -m compileall -q server.py tests
+
+      - name: Unit tests (Open-Meteo는 mock)
+        run: python -m pytest -v
+
+  docker-smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t "$IMAGE_NAME:ci" .
+
+      # CI에서만 8010을 열어 실제 컨테이너의 /health 와 MCP tools/list 를 확인한다.
+      - name: Run container and check MCP endpoints
+        run: |
+          set -e
+          docker run -d --name "$CONTAINER_NAME" -p 8010:8010 "$IMAGE_NAME:ci"
+          curl --fail --silent --show-error --retry 15 --retry-delay 2 --retry-all-errors \
+            http://127.0.0.1:8010/health
+          echo
+          curl --fail --silent --show-error -X POST http://127.0.0.1:8010/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | tee tools.json
+          grep -q '"get_weather"' tools.json
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs "$CONTAINER_NAME" || true
+
+  deploy:
+    needs: docker-smoke
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check deploy secrets
+        env:
+          AWS_HOST: ${{ secrets.AWS_HOST }}
+          AWS_USER: ${{ secrets.AWS_USER }}
+          AWS_SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          AWS_SSH_KNOWN_HOSTS: ${{ secrets.AWS_SSH_KNOWN_HOSTS }}
+        run: |
+          missing=0
+          for name in AWS_HOST AWS_USER AWS_SSH_PRIVATE_KEY AWS_SSH_KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then echo "::error::Secret $name is not set"; missing=1; fi
+          done
+          exit $missing
+
+      - name: Configure SSH
+        env:
+          AWS_SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          AWS_SSH_KNOWN_HOSTS: ${{ secrets.AWS_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$AWS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$AWS_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload source to server
+        env:
+          AWS_HOST: ${{ secrets.AWS_HOST }}
+          AWS_USER: ${{ secrets.AWS_USER }}
+        run: |
+          set -e
+          ssh -i ~/.ssh/deploy_key "$AWS_USER@$AWS_HOST" "rm -rf ~/$REMOTE_DIR && mkdir -p ~/$REMOTE_DIR"
+          tar -czf - Dockerfile .dockerignore requirements.txt server.py | \
+            ssh -i ~/.ssh/deploy_key "$AWS_USER@$AWS_HOST" "tar -C ~/$REMOTE_DIR -xzf -"
+
+      # 새 이미지를 sha 태그로 빌드 -> 기존 컨테이너 교체 -> 컨테이너 내부에서 /health 확인
+      - name: Build, replace container and verify
+        env:
+          AWS_HOST: ${{ secrets.AWS_HOST }}
+          AWS_USER: ${{ secrets.AWS_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$AWS_USER@$AWS_HOST" \
+            bash -s -- "$REMOTE_DIR" "$IMAGE_NAME" "$CONTAINER_NAME" "$DOCKER_NETWORK" "${GITHUB_SHA::7}" <<'REMOTE'
+          set -e
+          REMOTE_DIR=$1; IMAGE=$2; NAME=$3; NET=$4; TAG=$5
+          cd ~/"$REMOTE_DIR"
+          docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+          docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET"
+          docker rm -f "$NAME" >/dev/null 2>&1 || true
+          docker run -d --name "$NAME" --network "$NET" --restart unless-stopped "$IMAGE:$TAG"
+          for i in $(seq 1 20); do
+            if docker exec "$NAME" python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health')"; then
+              echo "weather-mcp healthy ($TAG)"; docker ps --filter "name=$NAME"
+              docker image prune -f >/dev/null
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "health check failed"; docker logs "$NAME"; exit 1
+          REMOTE
+
+      - name: Deployment summary
+        run: |
+          echo "### weather-mcp deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- image: \`$IMAGE_NAME:${GITHUB_SHA::7}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- network: \`$DOCKER_NETWORK\` (내부 주소 http://$CONTAINER_NAME:8010/mcp, Host 포트 미공개)" >> "$GITHUB_STEP_SUMMARY"
