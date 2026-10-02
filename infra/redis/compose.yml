@@ -1,0 +1,21 @@
+# EC2 (redis 인스턴스) 배포용. 보안 그룹: 6379 는 backend 인스턴스에서만 허용
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: weather-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD 필요}", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    restart: unless-stopped
+
+volumes:
+  redis-data:

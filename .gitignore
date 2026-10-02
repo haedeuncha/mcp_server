@@ -1,0 +1,11 @@
+# 비밀값
+.env
+**/.env
+!**/.env.example
+
+# Python
+.venv/
+**/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

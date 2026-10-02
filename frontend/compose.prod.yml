@@ -1,0 +1,10 @@
+# EC2 (frontend 인스턴스) 배포용. .env(BACKEND_URL)는 배포 워크플로가 생성
+# 보안 그룹: 8501 공개
+services:
+  frontend:
+    build: .
+    container_name: frontend
+    env_file: .env
+    ports:
+      - "8501:8501"
+    restart: unless-stopped

@@ -1,0 +1,10 @@
+# EC2 (backend 인스턴스) 배포용. .env 는 배포 워크플로가 생성 (MCP/redis/postgres 사설 IP 포함)
+# 보안 그룹: 8000 은 frontend 인스턴스에서만 허용
+services:
+  backend:
+    build: .
+    container_name: backend
+    env_file: .env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

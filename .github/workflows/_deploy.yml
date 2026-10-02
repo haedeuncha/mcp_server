@@ -1,0 +1,127 @@
+name: _deploy (reusable)
+
+# 서비스 하나를 자기 EC2 인스턴스에 배포하는 재사용 워크플로.
+# 각 CI 워크플로가 테스트 통과 후 호출한다 (secrets: inherit).
+#
+# 공통 secrets : AWS_USER, AWS_SSH_PRIVATE_KEY, AWS_SSH_KNOWN_HOSTS(5대 모두의 ssh-keyscan 결과)
+# 인스턴스 주소: MCP_EC2_HOST, BACKEND_EC2_HOST, FRONTEND_EC2_HOST, REDIS_EC2_HOST, POSTGRES_EC2_HOST
+# 앱 secrets   : REDIS_PASSWORD, POSTGRES_PASSWORD, BACKEND_ENV(선택, LLM 키 등)
+# 필요한 secret 이 없으면 배포만 건너뛴다 (워크플로는 성공).
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "mcp_server | backend | frontend | redis | postgres"
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-${{ inputs.service }}
+      cancel-in-progress: false
+    env:
+      SERVICE: ${{ inputs.service }}
+      AWS_USER: ${{ secrets.AWS_USER }}
+      AWS_SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+      AWS_SSH_KNOWN_HOSTS: ${{ secrets.AWS_SSH_KNOWN_HOSTS }}
+      MCP_EC2_HOST: ${{ secrets.MCP_EC2_HOST }}
+      BACKEND_EC2_HOST: ${{ secrets.BACKEND_EC2_HOST }}
+      FRONTEND_EC2_HOST: ${{ secrets.FRONTEND_EC2_HOST }}
+      REDIS_EC2_HOST: ${{ secrets.REDIS_EC2_HOST }}
+      POSTGRES_EC2_HOST: ${{ secrets.POSTGRES_EC2_HOST }}
+      REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve service settings
+        id: cfg
+        run: |
+          case "$SERVICE" in
+            mcp_server) dir=mcp_server;     host_var=MCP_EC2_HOST;      file=compose.prod.yml; need="";;
+            backend)    dir=backend;        host_var=BACKEND_EC2_HOST;  file=compose.prod.yml; need="MCP_EC2_HOST REDIS_EC2_HOST POSTGRES_EC2_HOST REDIS_PASSWORD POSTGRES_PASSWORD";;
+            frontend)   dir=frontend;       host_var=FRONTEND_EC2_HOST; file=compose.prod.yml; need="BACKEND_EC2_HOST";;
+            redis)      dir=infra/redis;    host_var=REDIS_EC2_HOST;    file=compose.yml;      need="REDIS_PASSWORD";;
+            postgres)   dir=infra/postgres; host_var=POSTGRES_EC2_HOST; file=compose.yml;      need="POSTGRES_PASSWORD";;
+            *) echo "::error::unknown service $SERVICE"; exit 1;;
+          esac
+          missing=""
+          for name in AWS_USER AWS_SSH_PRIVATE_KEY AWS_SSH_KNOWN_HOSTS $host_var $need; do
+            [ -z "${!name}" ] && missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning title=$SERVICE 배포 건너뜀::secret 미설정:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+          { echo "dir=$dir"; echo "file=$file"; echo "host=${!host_var}"; } >> "$GITHUB_OUTPUT"
+
+      - name: Configure SSH
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$AWS_SSH_PRIVATE_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$AWS_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+          printf 'Host *\n  User %s\n  IdentityFile ~/.ssh/id_deploy\n  ConnectTimeout 15\n' "$AWS_USER" > ~/.ssh/config
+
+      # 인스턴스 간 통신은 사설 IP 로 한다 (각 인스턴스에 SSH 로 물어봄)
+      - name: Write .env
+        if: steps.cfg.outputs.ready == 'true'
+        working-directory: ${{ steps.cfg.outputs.dir }}
+        run: |
+          umask 077
+          priv() { ssh "$1" "hostname -I | awk '{print \$1}'"; }
+          case "$SERVICE" in
+            mcp_server) : > .env ;;
+            backend)
+              MCP_IP=$(priv "$MCP_EC2_HOST"); REDIS_IP=$(priv "$REDIS_EC2_HOST"); PG_IP=$(priv "$POSTGRES_EC2_HOST")
+              echo "MCP=$MCP_IP REDIS=$REDIS_IP POSTGRES=$PG_IP"
+              {
+                printf '%s\n' "$BACKEND_ENV" | tr -d '\r'
+                echo "WEATHER_MCP_URL=http://$MCP_IP:8010/mcp"
+                echo "REDIS_URL=redis://:$REDIS_PASSWORD@$REDIS_IP:6379/0"
+                echo "DATABASE_URL=postgresql://weather:$POSTGRES_PASSWORD@$PG_IP:5432/weather"
+              } > .env ;;
+            frontend)
+              BACKEND_IP=$(priv "$BACKEND_EC2_HOST"); echo "BACKEND=$BACKEND_IP"
+              echo "BACKEND_URL=http://$BACKEND_IP:8000" > .env ;;
+            redis)    echo "REDIS_PASSWORD=$REDIS_PASSWORD" > .env ;;
+            postgres) printf 'POSTGRES_USER=weather\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=weather\n' "$POSTGRES_PASSWORD" > .env ;;
+          esac
+
+      - name: Upload and docker compose up
+        if: steps.cfg.outputs.ready == 'true'
+        env:
+          HOST: ${{ steps.cfg.outputs.host }}
+          DIR: ${{ steps.cfg.outputs.dir }}
+          FILE: ${{ steps.cfg.outputs.file }}
+        run: |
+          set -e
+          ssh "$HOST" "mkdir -p ~/weather/$SERVICE"
+          tar --exclude='tests' --exclude='.venv' --exclude='__pycache__' -C "$DIR" -czf - . \
+            | ssh "$HOST" "tar -C ~/weather/$SERVICE -xzf -"
+          ssh "$HOST" "cd ~/weather/$SERVICE && docker compose -f $FILE up -d --build --remove-orphans && docker image prune -f >/dev/null"
+
+      - name: Verify
+        if: steps.cfg.outputs.ready == 'true'
+        env:
+          HOST: ${{ steps.cfg.outputs.host }}
+          FILE: ${{ steps.cfg.outputs.file }}
+        run: |
+          case "$SERVICE" in
+            mcp_server) check="curl -fsS http://127.0.0.1:8010/health" ;;
+            backend)    check="curl -fsS http://127.0.0.1:8000/health | tee /dev/stderr | grep -q '\"redis\":\"ok\",\"database\":\"ok\"'" ;;
+            frontend)   check="curl -fsS http://127.0.0.1:8501/_stcore/health" ;;
+            redis)      check="[ \"\$(docker inspect -f '{{.State.Health.Status}}' weather-redis)\" = healthy ]" ;;
+            postgres)   check="[ \"\$(docker inspect -f '{{.State.Health.Status}}' weather-postgres)\" = healthy ]" ;;
+          esac
+          for i in $(seq 1 30); do
+            if ssh "$HOST" "$check"; then echo; echo "$SERVICE healthy"; echo "### ✅ $SERVICE 배포 완료" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+            sleep 4
+          done
+          ssh "$HOST" "cd ~/weather/$SERVICE && docker compose -f $FILE logs --tail 80" || true
+          exit 1

@@ -1,0 +1,81 @@
+# 전체 스택: weather-mcp + backend + frontend + redis + postgres
+# 변수(POSTGRES_*)는 루트 .env, 앱 설정은 각 폴더 .env(env_file)에서 읽고
+# 컨테이너 간 주소(URL)만 아래 environment에서 Docker 내부 이름으로 덮어쓴다.
+services:
+  weather-mcp:
+    build: ./mcp_server
+    container_name: weather-mcp
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: weather-redis
+    ports:
+      - "127.0.0.1:6379:6379"   # 로컬 개발용. 서버 외부에는 공개하지 않음
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: weather-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-weather}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?루트 .env에 POSTGRES_PASSWORD를 설정하세요}
+      POSTGRES_DB: ${POSTGRES_DB:-weather}
+    ports:
+      - "127.0.0.1:5432:5432"   # 로컬 개발용. 서버 외부에는 공개하지 않음
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: backend
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      WEATHER_MCP_URL: http://weather-mcp:8010/mcp
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-weather}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-weather}
+    depends_on:
+      weather-mcp: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    environment:
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      backend: { condition: service_healthy }
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  pg-data:

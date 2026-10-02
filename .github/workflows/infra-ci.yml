@@ -1,0 +1,48 @@
+name: infra (redis / postgres)
+
+on:
+  push:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/infra-ci.yml", ".github/workflows/_deploy.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/infra-ci.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Start redis / postgres and wait healthy
+        env:
+          REDIS_PASSWORD: ci-redis
+          POSTGRES_PASSWORD: ci-postgres
+        run: |
+          set -e
+          for d in infra/redis infra/postgres; do docker compose -f $d/compose.yml config -q; docker compose -f $d/compose.yml up -d; done
+          for c in weather-redis weather-postgres; do
+            for i in $(seq 1 30); do
+              [ "$(docker inspect -f '{{.State.Health.Status}}' $c)" = healthy ] && { echo "$c healthy"; break; }
+              [ $i = 30 ] && { docker logs $c; exit 1; }; sleep 2
+            done
+          done
+
+  deploy-redis:
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      service: redis
+    secrets: inherit
+
+  deploy-postgres:
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      service: postgres
+    secrets: inherit

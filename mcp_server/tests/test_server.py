@@ -38,7 +38,8 @@ def mock_open_meteo(monkeypatch):
 @pytest.fixture(scope="module")
 def client():
     # Streamable HTTP 세션 매니저는 프로세스당 한 번만 시작할 수 있어 module 범위로 공유한다.
-    with TestClient(server.mcp.streamable_http_app()) as test_client:
+    # MCP_HOST=127.0.0.1 이면 DNS rebinding 보호로 Host 헤더를 검사하므로 로컬 주소로 요청한다.
+    with TestClient(server.mcp.streamable_http_app(), base_url="http://127.0.0.1:8010") as test_client:
         yield test_client
 
 

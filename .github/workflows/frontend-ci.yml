@@ -1,0 +1,57 @@
+name: frontend CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["frontend/**", ".github/workflows/frontend-ci.yml", ".github/workflows/_deploy.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["frontend/**", ".github/workflows/frontend-ci.yml", ".github/workflows/_deploy.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: frontend/requirements*.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Syntax check
+        run: python -m compileall -q app.py tests
+      - name: Streamlit AppTest
+        run: python -m pytest -v
+
+  docker-smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: docker build -t weather-frontend:ci .
+      - name: Run container and check Streamlit health
+        run: |
+          docker run -d --name frontend -p 8501:8501 weather-frontend:ci
+          curl --fail -sS --retry 15 --retry-delay 2 --retry-all-errors http://127.0.0.1:8501/_stcore/health
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs frontend || true
+
+  deploy:
+    needs: [test, docker-smoke]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      service: frontend
+    secrets: inherit
