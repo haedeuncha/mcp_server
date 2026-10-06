@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from streamlit.testing.v1 import AppTest
 
-APP = str(Path(__file__).resolve().parents[1] / "app.py")
+APP = str(Path(__file__).resolve().parents[1] / "src" / "frontend" / "app.py")
 
 WEATHER = {"success": True, "cached": True, "city": "서울", "country": "대한민국", "date": "2026-10-03",
            "temperature_max": 22.5, "temperature_min": 13.2, "precipitation_probability": 60, "source": "Open-Meteo"}

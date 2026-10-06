@@ -8,23 +8,13 @@ Redis/DB 주소가 없거나 연결이 안 되면 해당 기능만 건너뛰고 
 
 import json
 import logging
-import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Literal
 
 import httpx
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 
-load_dotenv(Path(__file__).with_name(".env"))
-
-WEATHER_MCP_URL = os.getenv("WEATHER_MCP_URL", "http://127.0.0.1:8010/mcp")
-REDIS_URL = os.getenv("REDIS_URL", "")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
-BACKEND_HOST = os.getenv("BACKEND_HOST", "0.0.0.0")
-BACKEND_PORT = int(os.getenv("BACKEND_PORT", "8000"))
+from backend import config
 
 log = logging.getLogger("backend")
 MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
@@ -37,12 +27,12 @@ _redis = None
 def get_redis():
     """Redis 클라이언트. 설정이 없거나 연결 실패 시 None."""
     global _redis
-    if not REDIS_URL:
+    if not config.REDIS_URL:
         return None
     if _redis is None:
         import redis
 
-        _redis = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+        _redis = redis.Redis.from_url(config.REDIS_URL, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
     try:
         _redis.ping()
         return _redis
@@ -70,12 +60,12 @@ CREATE TABLE IF NOT EXISTS weather_history (
 
 def db_connect():
     """DB 연결. 설정이 없거나 연결 실패 시 None."""
-    if not DATABASE_URL:
+    if not config.DATABASE_URL:
         return None
     try:
         import psycopg
 
-        return psycopg.connect(DATABASE_URL, connect_timeout=3, autocommit=True)
+        return psycopg.connect(config.DATABASE_URL, connect_timeout=3, autocommit=True)
     except Exception as exc:  # noqa: BLE001
         log.warning("database unavailable: %s", exc)
         return None
@@ -127,7 +117,7 @@ def call_mcp_weather(city: str, day: str) -> dict:
         "params": {"name": "get_weather", "arguments": {"city": city, "day": day}},
     }
     with httpx.Client(timeout=20) as client:
-        response = client.post(WEATHER_MCP_URL, headers=MCP_HEADERS, json=payload)
+        response = client.post(config.WEATHER_MCP_URL, headers=MCP_HEADERS, json=payload)
         response.raise_for_status()
     body = response.json()
     if "error" in body:
@@ -184,7 +174,7 @@ def weather(city: str = Query("서울", min_length=1), day: Literal["today", "to
         raise HTTPException(status_code=502, detail=f"Weather MCP 호출 실패: {exc}") from exc
 
     if r and data.get("success"):
-        r.setex(key, CACHE_TTL_SECONDS, json.dumps(data, ensure_ascii=False))
+        r.setex(key, config.CACHE_TTL_SECONDS, json.dumps(data, ensure_ascii=False))
     save_history(city, day, False, data)
     return {**data, "cached": False}
 
@@ -197,4 +187,4 @@ def history(limit: int = Query(20, ge=1, le=100)) -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=BACKEND_HOST, port=BACKEND_PORT)
+    uvicorn.run(app, host=config.BACKEND_HOST, port=config.BACKEND_PORT)

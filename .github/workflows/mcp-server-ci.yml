@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - name: Syntax check
-        run: python -m compileall -q server.py tests
+        run: python -m compileall -q src tests
       - name: Unit tests (Open-Meteo는 mock)
         run: python -m pytest -v
 
@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build image
-        run: docker build -t weather-mcp:ci .
+        run: docker build -f docker/Dockerfile -t weather-mcp:ci .
       - name: Run container and check MCP endpoints
         run: |
           set -e

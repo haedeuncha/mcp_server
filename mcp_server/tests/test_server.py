@@ -4,7 +4,7 @@ import httpx
 import pytest
 from starlette.testclient import TestClient
 
-import server
+from mcp_server import server
 
 MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 

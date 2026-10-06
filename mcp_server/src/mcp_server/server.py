@@ -5,21 +5,14 @@ Docker에서는 Backend만 내부 주소 weather-mcp:8010으로 접근하고, �
 도시를 좌표로 변환한 뒤 오늘 또는 내일의 최고·최저 기온과 강수 확률을 반환합니다.
 """
 
-import os
-from pathlib import Path
-
 import httpx
-from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 
-load_dotenv(Path(__file__).with_name(".env"))
+from mcp_server import config
 
-MCP_HOST = os.getenv("MCP_HOST", "0.0.0.0")
-MCP_PORT = int(os.getenv("MCP_PORT", "8010"))
-
-mcp = FastMCP("weather-tools", host=MCP_HOST, port=MCP_PORT, stateless_http=True, json_response=True)
+mcp = FastMCP("weather-tools", host=config.MCP_HOST, port=config.MCP_PORT, stateless_http=True, json_response=True)
 
 # Open-Meteo 지오코딩은 한글 도시명("서울")을 찾지 못하므로 영문 이름으로 바꿔 다시 검색한다.
 KOREAN_CITY_ALIASES = {

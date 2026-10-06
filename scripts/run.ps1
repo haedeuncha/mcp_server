@@ -27,7 +27,8 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 
 function Start-App($dir, $cmd) {
     $path = Join-Path $root $dir
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$path'; `$host.UI.RawUI.WindowTitle='$dir'; .\.venv\Scripts\$cmd"
+    # src 레이아웃: PYTHONPATH=src 로 패키지(mcp_server / backend / frontend)를 찾게 한다
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$path'; `$host.UI.RawUI.WindowTitle='$dir'; `$env:PYTHONPATH='src'; .\.venv\Scripts\$cmd"
 }
 
 function Wait-Port($port, $name) {
@@ -60,8 +61,8 @@ function Run-Service($dir, $cmd, $port) {
 }
 
 # 2) 각 서비스는 별도 창에서 실행
-Run-Service "mcp_server" "python.exe server.py" 8010 | Out-Null
-Run-Service "backend"    "python.exe app.py"    8000 | Out-Null
-if (Run-Service "frontend" "streamlit.exe run app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true" 8501) {
+Run-Service "mcp_server" "python.exe -m mcp_server.server" 8010 | Out-Null
+Run-Service "backend"    "python.exe -m backend.app"    8000 | Out-Null
+if (Run-Service "frontend" "streamlit.exe run src/frontend/app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true" 8501) {
     Start-Process "http://127.0.0.1:8501"
 }

@@ -7,6 +7,30 @@
 | `frontend/` | Streamlit UI | 8501 |
 | (compose) | `redis` / `postgres` 컨테이너 | 6380 / 5432 (127.0.0.1만) |
 
+## 폴더 구조
+
+각 서비스는 같은 형태로 되어 있습니다.
+
+```
+<서비스>/                     (mcp_server, backend, frontend)
+├─ src/<서비스>/
+│   ├─ __init__.py
+│   ├─ config.py              .env 값을 한곳에서 읽는 설정 모듈
+│   └─ server.py | app.py      실제 코드
+├─ tests/                     pytest 테스트 (pytest.ini: pythonpath = src)
+├─ docker/Dockerfile          빌드: 서비스 폴더에서 docker build -f docker/Dockerfile .
+├─ compose.prod.yml           EC2 배포용
+├─ .env.example               필요한 환경변수 목록 (복사해서 .env 로 사용, .env 는 git 제외)
+├─ requirements.txt / requirements-dev.txt
+└─ .venv/                     scripts/setup.ps1 이 생성 (git 제외)
+```
+
+직접 실행할 때는 서비스 폴더에서 `PYTHONPATH=src` 를 지정합니다.
+
+```powershell
+cd backend; $env:PYTHONPATH="src"; .\.venv\Scripts\python -m backend.app
+```
+
 ## 환경 변수 (.env)
 
 각 폴더에 자기 `.env` 가 있습니다 (git 에는 올라가지 않음, 형식은 `.env.example` 참고).
@@ -29,9 +53,9 @@ powershell -ExecutionPolicy Bypass -File scripts\run.ps1     # redis/postgres(do
 수동 실행 시 (각각 다른 터미널):
 
 ```powershell
-cd mcp_server; .\.venv\Scripts\python server.py
-cd backend;    .\.venv\Scripts\python app.py
-cd frontend;   .\.venv\Scripts\streamlit run app.py --server.address 127.0.0.1 --server.port 8501
+cd mcp_server; $env:PYTHONPATH="src"; .\.venv\Scripts\python -m mcp_server.server
+cd backend;    $env:PYTHONPATH="src"; .\.venv\Scripts\python -m backend.app
+cd frontend;   $env:PYTHONPATH="src"; .\.venv\Scripts\streamlit run src/frontend/app.py --server.address 127.0.0.1 --server.port 8501
 ```
 
 ## 전체 Docker 실행

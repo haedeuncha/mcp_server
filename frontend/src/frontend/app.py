@@ -1,12 +1,7 @@
-import os
-from pathlib import Path
-
 import requests
 import streamlit as st
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).with_name(".env"))
-BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+from frontend.config import BACKEND_URL
 
 st.set_page_config(page_title="Weather Dashboard", page_icon="🌤️")
 st.title("Weather Dashboard")

@@ -2,7 +2,9 @@
 # 보안 그룹: 8501 공개
 services:
   frontend:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     container_name: frontend
     env_file: .env
     ports:

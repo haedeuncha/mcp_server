@@ -3,7 +3,9 @@
 # 컨테이너 간 주소(URL)만 아래 environment에서 Docker 내부 이름으로 덮어쓴다.
 services:
   weather-mcp:
-    build: ./mcp_server
+    build:
+      context: ./mcp_server
+      dockerfile: docker/Dockerfile
     container_name: weather-mcp
     environment:
       MCP_HOST: 0.0.0.0
@@ -48,7 +50,9 @@ services:
     restart: unless-stopped
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile
     container_name: backend
     env_file:
       - path: ./backend/.env
@@ -66,7 +70,9 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: docker/Dockerfile
     container_name: frontend
     environment:
       BACKEND_URL: http://backend:8000

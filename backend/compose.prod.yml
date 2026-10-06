@@ -2,7 +2,9 @@
 # 보안 그룹: 8000 은 frontend 인스턴스에서만 허용
 services:
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     container_name: backend
     env_file: .env
     ports:

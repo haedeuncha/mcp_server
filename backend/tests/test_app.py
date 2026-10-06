@@ -9,7 +9,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-import app as backend
+from backend import app as backend
+from backend import config
 
 WEATHER = {"success": True, "city": "서울", "country": "대한민국", "date": "2026-10-03",
            "temperature_max": 22.5, "temperature_min": 13.2, "precipitation_probability": 60,
@@ -43,18 +44,18 @@ def mcp_calls(monkeypatch):
 
 @pytest.fixture
 def no_db(monkeypatch):
-    monkeypatch.setattr(backend, "DATABASE_URL", "")
+    monkeypatch.setattr(config, "DATABASE_URL", "")
 
 
 @pytest.fixture
 def fake_redis(monkeypatch):
-    monkeypatch.setattr(backend, "REDIS_URL", "redis://fake")
+    monkeypatch.setattr(config, "REDIS_URL", "redis://fake")
     monkeypatch.setattr(backend, "_redis", fakeredis.FakeRedis(decode_responses=True))
 
 
 @pytest.fixture
 def no_redis(monkeypatch):
-    monkeypatch.setattr(backend, "REDIS_URL", "")
+    monkeypatch.setattr(config, "REDIS_URL", "")
 
 
 def test_health_without_redis_and_db(no_redis, no_db):
@@ -111,7 +112,7 @@ def test_invalid_day_rejected(no_redis, no_db):
 
 @pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL 없음 (CI postgres 서비스에서 실행)")
 def test_history_saved_to_postgres(mcp_calls, no_redis, monkeypatch):
-    monkeypatch.setattr(backend, "DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    monkeypatch.setattr(config, "DATABASE_URL", os.environ["TEST_DATABASE_URL"])
     with TestClient(backend.app) as client:
         client.get("/weather", params={"city": "서울"})
         items = client.get("/history", params={"limit": 1}).json()["items"]

@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - name: Syntax check
-        run: python -m compileall -q app.py tests
+        run: python -m compileall -q src tests
       - name: Streamlit AppTest
         run: python -m pytest -v
 
@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build image
-        run: docker build -t weather-frontend:ci .
+        run: docker build -f docker/Dockerfile -t weather-frontend:ci .
       - name: Run container and check Streamlit health
         run: |
           docker run -d --name frontend -p 8501:8501 weather-frontend:ci

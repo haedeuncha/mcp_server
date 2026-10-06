@@ -104,7 +104,8 @@ jobs:
           ssh "$HOST" "mkdir -p ~/weather/$SERVICE"
           tar --exclude='tests' --exclude='.venv' --exclude='__pycache__' -C "$DIR" -czf - . \
             | ssh "$HOST" "tar -C ~/weather/$SERVICE -xzf -"
-          ssh "$HOST" "cd ~/weather/$SERVICE && docker compose -f $FILE up -d --build --remove-orphans && docker image prune -f >/dev/null"
+          # 디스크(8GB) 부족 방지: 빌드 전후로 빌드 캐시와 안 쓰는 이미지를 정리
+          ssh "$HOST" "cd ~/weather/$SERVICE && docker builder prune -af >/dev/null; docker compose -f $FILE up -d --build --remove-orphans && docker image prune -f >/dev/null && docker builder prune -af >/dev/null; df -h / | tail -1"
 
       - name: Verify
         if: steps.cfg.outputs.ready == 'true'
