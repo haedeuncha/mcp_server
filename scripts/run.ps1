@@ -36,8 +36,27 @@ function Wait-Port($port, $name) {
     return $false
 }
 
+# 포트를 이미 쓰는 프로세스가 있으면 알려주고 새로 띄우지 않는다 (이전 실행 창이 남아 있는 경우 등)
+function Port-Owner($port) {
+    $c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($c) { return Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue }
+    return $null
+}
+
+function Run-Service($dir, $cmd, $port) {
+    $owner = Port-Owner $port
+    if ($owner) {
+        Write-Host "  ${dir}: ${port} 포트를 이미 '$($owner.ProcessName)'(PID $($owner.Id))가 쓰고 있어 새로 띄우지 않습니다." -ForegroundColor Yellow
+        Write-Host "     이전 실행 창이면 그대로 쓰면 되고, 다시 띄우려면: Stop-Process -Id $($owner.Id)" -ForegroundColor Yellow
+        return $true
+    }
+    Start-App $dir $cmd
+    return (Wait-Port $port $dir)
+}
+
 # 2) 각 서비스는 별도 창에서 실행
-Start-App "mcp_server" "python.exe server.py";  Wait-Port 8010 "mcp_server" | Out-Null
-Start-App "backend"    "python.exe app.py";     Wait-Port 8000 "backend"    | Out-Null
-Start-App "frontend"   "streamlit.exe run app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true"
-if (Wait-Port 8501 "frontend") { Start-Process "http://127.0.0.1:8501" }
+Run-Service "mcp_server" "python.exe server.py" 8010 | Out-Null
+Run-Service "backend"    "python.exe app.py"    8000 | Out-Null
+if (Run-Service "frontend" "streamlit.exe run app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true" 8501) {
+    Start-Process "http://127.0.0.1:8501"
+}
