@@ -14,8 +14,13 @@ foreach ($dir in "mcp_server", "backend", "frontend") {
 # 1) redis(127.0.0.1:6380) + postgres(127.0.0.1:5432) - Docker Desktop 이 켜져 있을 때만
 if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Host "redis / postgres 컨테이너 시작" -ForegroundColor Green
-    docker compose -f (Join-Path $root "compose.yml") up -d redis postgres 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) { Write-Host "docker 실행 실패: 캐시/조회 기록 없이 계속합니다 (Docker Desktop 이 켜져 있는지 확인)" -ForegroundColor Yellow }
+    # docker 진행 메시지는 stderr 로 나오므로 문자열로 바꿔 출력 (PowerShell 5 의 빨간 NativeCommandError 방지)
+    docker compose -f (Join-Path $root "compose.yml") up -d redis postgres 2>&1 | ForEach-Object { "  $_" } | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        $existing = docker ps --filter "name=^weather-(redis|postgres)$" --format "{{.Names}}" 2>$null
+        if ($existing) { Write-Host "  기존 컨테이너를 그대로 사용합니다: $($existing -join ', ')" -ForegroundColor Yellow }
+        else { Write-Host "  docker 실행 실패: 캐시/조회 기록 없이 계속합니다 (Docker Desktop 이 켜져 있는지 확인)" -ForegroundColor Yellow }
+    }
 } else {
     Write-Host "docker 없음: redis/postgres 없이 실행합니다 (캐시/조회 기록 비활성)" -ForegroundColor Yellow
 }
