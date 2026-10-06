@@ -19,7 +19,7 @@ services:
     image: redis:7-alpine
     container_name: weather-redis
     ports:
-      - "127.0.0.1:6379:6379"   # 로컬 개발용. 서버 외부에는 공개하지 않음
+      - "127.0.0.1:6380:6379"   # 로컬 개발용(PC의 기존 redis 6379와 겹치지 않게 6380). 외부 비공개
     volumes:
       - redis-data:/data
     healthcheck:

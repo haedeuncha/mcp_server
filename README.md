@@ -5,7 +5,7 @@
 | `mcp_server/` | 날씨 MCP 서버 (FastMCP, Open-Meteo) | 8010 |
 | `backend/` | FastAPI. MCP `get_weather` 호출 + Redis 캐시 + PostgreSQL 조회 기록 | 8000 |
 | `frontend/` | Streamlit UI | 8501 |
-| (compose) | `redis` / `postgres` 컨테이너 | 6379 / 5432 (127.0.0.1만) |
+| (compose) | `redis` / `postgres` 컨테이너 | 6380 / 5432 (127.0.0.1만) |
 
 ## 환경 변수 (.env)
 

@@ -12,7 +12,7 @@ MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": 
 def _fake_open_meteo(request: httpx.Request) -> httpx.Response:
     if "geocoding" in request.url.host:
         name = request.url.params["name"]
-        if name == "없는도시":
+        if name != "Seoul":  # 실제 Open-Meteo처럼 한글 이름은 결과가 없다
             return httpx.Response(200, json={})
         return httpx.Response(200, json={"results": [{"name": "서울", "country": "대한민국", "latitude": 37.56, "longitude": 126.97}]})
     return httpx.Response(200, json={"daily": {
@@ -76,3 +76,13 @@ def test_get_weather_city_not_found(mock_open_meteo):
 def test_get_weather_rejects_invalid_day():
     with pytest.raises(ValueError):
         server.get_weather("서울", "yesterday")
+
+
+def test_korean_city_falls_back_to_english(mock_open_meteo):
+    assert server.get_weather("서울특별시", "tomorrow")["success"] is True
+
+
+def test_search_names():
+    assert server.search_names("서울") == ["서울", "Seoul"]
+    assert server.search_names("부산광역시") == ["부산광역시", "부산", "Busan"]
+    assert server.search_names("Tokyo") == ["Tokyo"]
